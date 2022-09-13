@@ -34,6 +34,9 @@ from internal_font_class import Font
 
 #exporters_init()
 
+#import importers
+sys.path.append(os.path.join(sys.path[0], "importers"))
+
 #import exporters
 sys.path.append(os.path.join(sys.path[0], "exporters"))
 
@@ -228,6 +231,106 @@ class PrefsWindow(Gtk.Window):
     self.destroy()
     del self
 
+
+class ImportWindow(Gtk.Window):
+  def __init__(self, parent):
+    GObject.GObject.__init__(self)
+    self._parent = parent
+
+    self.set_title("Import Font")
+
+    self.layout = Gtk.VBox()
+    self.layout.set_border_width(5)
+
+    self.fsf = Gtk.Frame.new("Select Filename")
+
+    self.file_select = Gtk.FileChooserWidget(action=Gtk.FileChooserAction.OPEN)
+
+    self.fsf.add(self.file_select)
+
+    self.layout.pack_start(self.fsf, True, True, 0)
+
+    self.sub_layout = Gtk.VBox()
+    self.import_frame = Gtk.Frame.new("Select Format")
+    self.import_frame.add(self.sub_layout)
+    self.layout.pack_start(self.import_frame, False, True, 0)
+    self.importers = Gtk.ComboBoxText()
+
+    # generate a list of importers
+    self.import_details = []
+    files = os.listdir(os.path.join(sys.path[0], "importers"))
+    for f in files:
+      prt = os.path.splitext(f)
+      if prt[1] == ".py":
+        self.import_details.append(
+          {"module": __import__(prt[0], globals(), locals(), [], 0)})
+        self.import_details[-1].update(
+          self.import_details[-1]['module'].importers)
+
+    for e in self.import_details:
+      self.importers.append_text(e['name'])
+
+    self.importers.set_active(0)
+
+    self.sub_layout.pack_start(self.importers, True, True, 0)
+
+    self.add(self.layout)
+
+    self.import_label = Gtk.Label(label=self.import_details[0]['desc'])
+    self.sub_layout.pack_start(self.import_label, True, True, 0)
+
+    self.button_layout = Gtk.HButtonBox()
+    self.button_import = Gtk.Button.new_with_mnemonic("_import")
+    self.button_import.connect("clicked", self.import_cb)
+    self.button_cancel = Gtk.Button.new_with_mnemonic("_Cancel")
+    self.button_cancel.connect("clicked", self.cancel_cb)
+    self.button_layout.pack_end(self.button_cancel, True, True, 0)
+    self.button_layout.pack_end(self.button_import, True, True, 0)
+    self.button_layout.set_layout(Gtk.ButtonBoxStyle.END)
+    self.layout.pack_start(self.button_layout, False, True, 0)
+
+    self._parent.set_sensitive(False)
+    self.connect("destroy", self.cancel_cb)
+
+    self.show_all()
+
+  def cancel_cb(self, *kw):
+    self._parent.set_sensitive(True)
+    self.destroy()
+    del self
+
+  def import_cb(self, *kw):
+    if self.file_select.get_filename() == "":
+      self.notify("You must select a file to import from.")
+      return
+
+    # actually run the importer
+    ret = self.import_details[self.importers.get_active()]['func'](
+                                        self._parent.font,
+                                        self.file_select.get_filename())
+
+    if isinstance(ret, str):
+      self.notify(ret)
+      return
+
+    self._parent.load()
+    self._parent.set_sensitive(True)
+    self.destroy()
+    del self
+
+  def notify(self, message):
+    self.set_sensitive(False)
+    self.msg_box = Gtk.MessageDialog(
+      parent=self, buttons=Gtk.ButtonsType.OK, message_format=message)
+    self.msg_box.connect("response", self.msg_response)
+    self.msg_box.show()
+
+  def msg_response(self, *kw):
+    self.msg_box.destroy()
+    del self.msg_box
+    self.set_sensitive(True)
+
+
 class ExportWindow(Gtk.Window):
   def __init__(self, parent):
     GObject.GObject.__init__(self)
@@ -371,6 +474,11 @@ class MainWindow(Gtk.Window):
     self.save_mnu_itm = Gtk.MenuItem.new_with_mnemonic("_Save")
     self.save_mnu_itm.connect("activate", self.save_cb)
     self.file_mnu.append(self.save_mnu_itm)
+
+    ### Import
+    self.import_mnu_itm = Gtk.MenuItem.new_with_mnemonic("_Import")
+    self.import_mnu_itm.connect("activate", self.import_cb)
+    self.file_mnu.append(self.import_mnu_itm)
 
     ### Export
     self.export_mnu_itm = Gtk.MenuItem.new_with_mnemonic("_Export")
@@ -557,6 +665,13 @@ class MainWindow(Gtk.Window):
     with open(self.filename, "rb") as fr:
       p = pickle.Unpickler(fr)
       self.font = p.load()
+
+  def import_cb(self, *kw):
+    if not self.check_saved(self.import_cb):
+      return
+
+    # show the import dialog
+    ed = ImportWindow(self)
 
   def export_cb(self, *kw):
     # make sure the font is fully up to date
